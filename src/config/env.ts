@@ -9,6 +9,7 @@ const envSchema = z.object({
   TWILIO_AUTH_TOKEN: z.string().min(1, 'TWILIO_AUTH_TOKEN is required'),
   TWILIO_PHONE_NUMBER: z.string().min(1, 'TWILIO_PHONE_NUMBER is required'),
   BASE_URL: z.string().min(1, 'BASE_URL is required'),
+  ELEVENLABS_AGENT_ID: z.string().min(1, 'ELEVENLABS_AGENT_ID is required'),
 });
 
 const parsed = envSchema.safeParse(process.env);

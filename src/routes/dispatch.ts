@@ -36,7 +36,8 @@ dispatchRouter.post('/', async (req, res) => {
       })
     )
   );
-
+  console.log(`${env.BASE_URL}/twilio/outbound`);
+  console.log(results);
   const successful: Array<{ to: string; callSid: string; jobSpecId: string }> = [];
   const failed: Array<{ to: string; error: string; jobSpecId: string }> = [];
 

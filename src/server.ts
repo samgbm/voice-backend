@@ -4,6 +4,7 @@ import http from 'http';
 import { WebSocketServer } from 'ws';
 import cors from 'cors';
 import dispatchRouter from './routes/dispatch';
+import { handleTwilioStream } from './services/streamHandler';
 
 const app = express();
 const server = http.createServer(app);
@@ -28,26 +29,11 @@ app.post('/twilio/outbound', (req, res) => {
 });
 
 wss.on('connection', (ws, req) => {
-  const path = req.url?.split('?')[0];
-  if (path !== '/twilio/stream') {
-    ws.close();
+  if (req.url?.split('?')[0] === '/twilio/stream') {
+    handleTwilioStream(ws, req);
     return;
   }
-
-  console.log('Twilio Media Stream connected');
-
-  ws.on('message', (data) => {
-    try {
-      const msg = JSON.parse(data.toString());
-      console.log(msg.event);
-
-      if (msg.event === 'start') {
-        console.log(msg.start.streamSid);
-      }
-    } catch (err) {
-      console.error('Failed to parse WebSocket message', err);
-    }
-  });
+  ws.close();
 });
 
 const PORT = env.PORT || process.env.PORT || 8080;
