@@ -1,33 +1,18 @@
+import { env } from './config/env';
 import express from 'express';
 import http from 'http';
 import { WebSocketServer } from 'ws';
 import cors from 'cors';
-import dotenv from 'dotenv';
-import { z } from 'zod';
-
-dotenv.config();
-
-const envSchema = z.object({
-  PORT: z.string().optional(),
-  TWILIO_ACCOUNT_SID: z.string().min(1, 'TWILIO_ACCOUNT_SID is required'),
-  TWILIO_AUTH_TOKEN: z.string().min(1, 'TWILIO_AUTH_TOKEN is required'),
-});
-
-const parsed = envSchema.safeParse(process.env);
-if (!parsed.success) {
-  console.error('Missing or invalid environment variables:');
-  for (const issue of parsed.error.issues) {
-    console.error(`  - ${issue.path.join('.')}: ${issue.message}`);
-  }
-  process.exit(1);
-}
+import dispatchRouter from './routes/dispatch';
 
 const app = express();
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
 app.use(cors());
+app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use('/api/dispatch', dispatchRouter);
 
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok', service: 'voice-orchestrator' });
@@ -65,7 +50,7 @@ wss.on('connection', (ws, req) => {
   });
 });
 
-const PORT = process.env.PORT || 8080;
+const PORT = env.PORT || process.env.PORT || 8080;
 server.listen(PORT, () => {
   console.log(`Voice orchestrator listening on port ${PORT}`);
 });
