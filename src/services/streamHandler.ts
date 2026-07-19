@@ -1,6 +1,7 @@
 import WebSocket from 'ws';
 import { IncomingMessage } from 'http';
 import { env } from '../config/env';
+import { logger } from '../utils/logger';
 import { toElevenLabsUserAudio, toTwilioMulawPayload } from './audioCodec';
 
 function safeClose(ws: WebSocket): void {
@@ -26,7 +27,7 @@ export const handleTwilioStream = (twilioWs: WebSocket, _req: IncomingMessage) =
   );
 
   elevenLabsWs.on('open', () => {
-    console.log('ElevenLabs connected');
+    logger.info('ElevenLabs connected');
     // Codec is controlled by the agent dashboard (set both to u-law 8000 for Twilio).
     // Websocket config overrides do not reliably change TTS/ASR formats.
     elevenLabsWs.send(
@@ -36,23 +37,45 @@ export const handleTwilioStream = (twilioWs: WebSocket, _req: IncomingMessage) =
     );
   });
 
-  elevenLabsWs.on('message', (data) => {
+  elevenLabsWs.on('message', (msg) => {
     try {
-      const msg = JSON.parse(data.toString());
+      const data = JSON.parse(msg.toString());
 
-      if (msg.type === 'conversation_initiation_metadata') {
-        const meta = msg.conversation_initiation_metadata_event ?? {};
+      if (data.type === 'agent_response') {
+        logger.info(
+          { text: data.agent_response_event.agent_response },
+          '🤖 AGENT SPEAKING'
+        );
+      }
+
+      if (data.type === 'user_transcript') {
+        logger.info(
+          { text: data.user_transcription_event.user_transcript },
+          '👤 USER SPEAKING'
+        );
+      }
+
+      if (data.type === 'interruption') {
+        logger.warn('⚠️ BARGE-IN DETECTED: Agent Interrupted by User');
+        if (streamSid && twilioWs.readyState === WebSocket.OPEN) {
+          twilioWs.send(JSON.stringify({ event: 'clear', streamSid }));
+        }
+        return;
+      }
+
+      if (data.type === 'conversation_initiation_metadata') {
+        const meta = data.conversation_initiation_metadata_event ?? {};
         agentOutputFormat = meta.agent_output_audio_format ?? null;
         userInputFormat = meta.user_input_audio_format ?? null;
-        console.log('ElevenLabs audio formats', {
-          agentOutputFormat,
-          userInputFormat,
-        });
+        logger.info(
+          { agentOutputFormat, userInputFormat },
+          'ElevenLabs audio formats'
+        );
         if (
           (agentOutputFormat && agentOutputFormat !== 'ulaw_8000') ||
           (userInputFormat && userInputFormat !== 'ulaw_8000')
         ) {
-          console.warn(
+          logger.warn(
             'Agent is not on ulaw_8000. Bridge will convert audio. ' +
               'For best quality, set BOTH TTS output and input to "u-law 8000" ' +
               'in the ElevenLabs agent dashboard.'
@@ -61,8 +84,8 @@ export const handleTwilioStream = (twilioWs: WebSocket, _req: IncomingMessage) =
         return;
       }
 
-      if (msg.type === 'ping') {
-        const eventId = msg.ping_event?.event_id;
+      if (data.type === 'ping') {
+        const eventId = data.ping_event?.event_id;
         if (eventId != null && elevenLabsWs.readyState === WebSocket.OPEN) {
           elevenLabsWs.send(
             JSON.stringify({ type: 'pong', event_id: eventId })
@@ -71,21 +94,12 @@ export const handleTwilioStream = (twilioWs: WebSocket, _req: IncomingMessage) =
         return;
       }
 
-      if (
-        msg.type === 'interruption' &&
-        streamSid &&
-        twilioWs.readyState === WebSocket.OPEN
-      ) {
-        twilioWs.send(JSON.stringify({ event: 'clear', streamSid }));
-        return;
-      }
-
-      if (msg.type !== 'audio') {
+      if (data.type !== 'audio') {
         return;
       }
 
       const audioPayload =
-        msg.audio_event?.audio_base_64 ?? msg.audio ?? null;
+        data.audio_event?.audio_base_64 ?? data.audio ?? null;
 
       if (audioPayload && streamSid && twilioWs.readyState === WebSocket.OPEN) {
         const payload = toTwilioMulawPayload(audioPayload, agentOutputFormat);
@@ -98,27 +112,27 @@ export const handleTwilioStream = (twilioWs: WebSocket, _req: IncomingMessage) =
         );
       }
     } catch (err) {
-      console.error('Failed to parse ElevenLabs message', err);
+      logger.error({ err }, 'Failed to parse ElevenLabs message');
     }
   });
 
   elevenLabsWs.on('close', () => {
-    console.log('ElevenLabs WebSocket closed');
+    logger.info('ElevenLabs WebSocket closed');
     safeClose(twilioWs);
   });
 
   elevenLabsWs.on('error', (err) => {
-    console.error('ElevenLabs WebSocket error', err);
+    logger.error({ err }, 'ElevenLabs WebSocket error');
     safeClose(twilioWs);
   });
 
-  twilioWs.on('message', (data) => {
+  twilioWs.on('message', (raw) => {
     try {
-      const msg = JSON.parse(data.toString());
+      const msg = JSON.parse(raw.toString());
 
       if (msg.event === 'start') {
         streamSid = msg.start.streamSid;
-        console.log('Twilio stream started', streamSid);
+        logger.info({ streamSid }, 'Twilio stream started');
         return;
       }
 
@@ -134,21 +148,21 @@ export const handleTwilioStream = (twilioWs: WebSocket, _req: IncomingMessage) =
       }
 
       if (msg.event === 'stop') {
-        console.log('Twilio stream stopped');
+        logger.info('Twilio stream stopped');
         safeClose(elevenLabsWs);
       }
     } catch (err) {
-      console.error('Failed to parse Twilio message', err);
+      logger.error({ err }, 'Failed to parse Twilio message');
     }
   });
 
   twilioWs.on('close', () => {
-    console.log('Twilio WebSocket closed');
+    logger.info('Twilio WebSocket closed');
     safeClose(elevenLabsWs);
   });
 
   twilioWs.on('error', (err) => {
-    console.error('Twilio WebSocket error', err);
+    logger.error({ err }, 'Twilio WebSocket error');
     safeClose(elevenLabsWs);
   });
 };
